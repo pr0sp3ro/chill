@@ -13,16 +13,22 @@
 package main
 
 import (
+	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
+
+//go:embed foreground.lua
+var foregroundScript []byte
 
 const (
 	reset  = "\033[0m"
@@ -100,8 +106,21 @@ func main() {
 
 	// options
 	station := flag.String("station", "", "station to play")
+	volume := flag.Int("volume", -1, "playback volume (0-100)")
 
 	flag.Parse()
+
+	volumeProvided := false
+	flag.Visit(func(parsedFlag *flag.Flag) {
+		if parsedFlag.Name == "volume" {
+			volumeProvided = true
+		}
+	})
+
+	if volumeProvided && (*volume < 0 || *volume > 100) {
+		fmt.Fprintln(os.Stderr, "volume must be between 0 and 100")
+		os.Exit(2)
+	}
 
 	switch {
 	case *daemon:
@@ -132,7 +151,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "unknown station: %s\n", s)
 			os.Exit(1)
 		}
-		playForeground(st)
+		playForeground(st, *volume)
 	default:
 		// default: play via daemon
 		s := *station
@@ -142,7 +161,7 @@ func main() {
 		if s == "" {
 			s = "lofi-girl"
 		}
-		clientPlay(s)
+		clientPlay(s, *volume)
 	}
 }
 
@@ -159,6 +178,7 @@ func printStations() {
 	fmt.Println()
 	fmt.Printf("    %schill%s              %splay default station%s\n", cyan, reset, dim, reset)
 	fmt.Printf("    %schill chillhop%s     %splay specific station%s\n", cyan, reset, dim, reset)
+	fmt.Printf("    %schill --volume 40%s %splay at 40%% volume%s\n", cyan, reset, dim, reset)
 	fmt.Printf("    %schill -i%s           %sinteractive mode (repl)%s\n", cyan, reset, dim, reset)
 	fmt.Printf("    %schill --skip%s       %sskip to random station%s\n", cyan, reset, dim, reset)
 	fmt.Printf("    %schill --toggle%s     %spause/resume%s\n", cyan, reset, dim, reset)
@@ -182,24 +202,67 @@ func findStation(name string) *Station {
 
 // playForeground plays a station in foreground mode with mpv's interactive
 // terminal interface, allowing volume control, seeking, and other mpv keybindings.
-func playForeground(s *Station) {
+func playForeground(s *Station, volume int) {
 	vibe := vibes[randInt(len(vibes))]
+	stationDescriptions := make([]string, len(stations))
+	stationIndex := 0
+	for index, station := range stations {
+		stationDescriptions[index] = station.Desc
+		if station.Name == s.Name {
+			stationIndex = index
+		}
+	}
+
+	descriptionsJSON, err := json.Marshal(stationDescriptions)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to prepare station list: %v\n", err)
+		os.Exit(1)
+	}
+
+	scriptFile, err := os.CreateTemp("", "chill-foreground-*.lua")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to prepare mpv controls: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.Remove(scriptFile.Name())
+
+	if _, err := scriptFile.Write(foregroundScript); err != nil {
+		scriptFile.Close()
+		fmt.Fprintf(os.Stderr, "failed to prepare mpv controls: %v\n", err)
+		os.Exit(1)
+	}
+	if err := scriptFile.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to prepare mpv controls: %v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Print("\033[2J\033[H")
 	fmt.Print(logo)
-	fmt.Printf("  %s♪ %s%s\n", pink, s.Desc, reset)
+	fmt.Printf("  %s♪ current station is shown below%s\n", pink, reset)
 	fmt.Printf("  %s~ %s ~%s\n\n", dim, vibe, reset)
-	fmt.Printf("  %s[q]uit  [m]ute  [9/0] volume  [←/→] seek%s\n\n", dim, reset)
+	fmt.Printf("  %s[,] previous  [.] next  [q]uit  [m]ute  [9/0] volume  [←/→] seek%s\n\n", dim, reset)
 
-	cmd := exec.Command("mpv",
+	volumeArg := "--volume=70"
+	if volume >= 0 {
+		volumeArg = fmt.Sprintf("--volume=%d", volume)
+	}
+
+	args := []string{
 		"--no-video",
 		"--term-osd-bar",
 		"--term-osd-bar-chars=╺━━╸",
-		"--term-status-msg=  ${playback-time} │ ${audio-codec-name} ${audio-params/samplerate}Hz │ ${audio-bitrate}",
+		"--term-status-msg=  ${media-title} │ ${playback-time} │ ${audio-codec-name} ${audio-params/samplerate}Hz │ ${audio-bitrate}",
 		"--msg-level=all=no,statusline=status",
-		"--volume=70",
-		s.URL,
-	)
+		"--playlist-start=" + strconv.Itoa(stationIndex),
+		"--script=" + scriptFile.Name(),
+		volumeArg,
+	}
+	for _, station := range stations {
+		args = append(args, station.URL)
+	}
+
+	cmd := exec.Command("mpv", args...)
+	cmd.Env = append(os.Environ(), "CHILL_INTERNAL_STATION_DESCRIPTIONS="+string(descriptionsJSON))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

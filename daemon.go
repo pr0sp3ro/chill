@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,15 @@ func (d *Daemon) execute(action, arg string) string {
 }
 
 func (d *Daemon) play(name string) string {
+	parts := strings.Fields(name)
+	volume := -1
+	if len(parts) > 1 {
+		name = parts[0]
+		if parsedVolume, err := strconv.Atoi(parts[1]); err == nil {
+			volume = parsedVolume
+		}
+	}
+
 	if name == "" {
 		name = "lofi-girl"
 	}
@@ -131,11 +141,15 @@ func (d *Daemon) play(name string) string {
 	d.paused = false
 	d.startedAt = time.Now()
 
-	d.cmd = exec.Command("mpv",
+	args := []string{
 		"--no-video",
 		"--really-quiet",
-		station.URL,
-	)
+	}
+	if volume >= 0 {
+		args = append(args, fmt.Sprintf("--volume=%d", volume))
+	}
+	args = append(args, station.URL)
+	d.cmd = exec.Command("mpv", args...)
 	d.cmd.Stdout = io.Discard
 	d.cmd.Stderr = io.Discard
 

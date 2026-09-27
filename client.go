@@ -67,7 +67,7 @@ func ensureDaemon() error {
 }
 
 // clientPlay starts playing the specified station via the daemon.
-func clientPlay(station string) {
+func clientPlay(station string, volume int) {
 	if err := ensureDaemon(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -76,6 +76,9 @@ func clientPlay(station string) {
 	cmd := "play"
 	if station != "" {
 		cmd += " " + station
+	}
+	if volume >= 0 {
+		cmd += fmt.Sprintf(" %d", volume)
 	}
 
 	resp, err := sendCommand(cmd)
@@ -123,7 +126,7 @@ func clientStatus() {
 // clientToggle pauses if playing, resumes if paused, or starts playing if stopped.
 func clientToggle() {
 	if !isDaemonRunning() {
-		clientPlay("lofi-girl")
+		clientPlay("lofi-girl", -1)
 		return
 	}
 
