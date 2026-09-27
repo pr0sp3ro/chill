@@ -75,6 +75,8 @@ var stations = []Station{
 	{"code-radio", "https://www.youtube.com/watch?v=ByZGu229-yA", "Code Radio - beats to study & code to"},
 	{"sleep", "https://www.youtube.com/watch?v=rPjez8z61rI", "Lofi - beats to sleep/relax to"},
 	{"study", "https://www.youtube.com/watch?v=7NOSDKb0HlU", "Lofi - beats to study/relax to"},
+	{"sad", "https://www.youtube.com/watch?v=CwPCy1GLS38", "Sad lofi radio"},
+	{"synthwave", "https://www.youtube.com/watch?v=4xDzrJKXOOY", "Synthwave radio - beats to chill/game to"},
 }
 
 func init() {
